@@ -1,0 +1,10 @@
+{
+  "name": "convex-demo",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "convex": "^1.43.0",
+    "@convex-dev/rate-limiter": "^0.2.0",
+    "@convex-dev/aggregate": "^0.2.0"
+  }
+}
