@@ -66,6 +66,29 @@ Locks default to an in-memory store so the demo needs no AWS credentials; set
 `LOCK_TABLE` (and optionally `DDB_ENDPOINT` for DynamoDB Local) to use the real
 conditional-write implementation in `orchestrator/locks.py`.
 
+## Observability
+
+![Fleet dashboard](docs/dashboard-light.png)
+
+The control plane serves an observability sidecar on `-metrics-addr` (default `:8061`):
+
+- **`/metrics`** — Prometheus text format: fleet gauges (`bwsim_hosts_connected`,
+  `bwsim_mitigations_active`), counters (`bwsim_config_pushes_total`,
+  `bwsim_drains_total`, `bwsim_health_reports_total`), and per-host gauges
+  (`bwsim_host_largest_free_block_bytes`, `bwsim_host_config_load_ms`). In
+  production the CloudWatch agent scrapes this into the `BwSim/Fleet` namespace.
+- **`/api/fleet`** — JSON snapshot backing the dashboard.
+- **`/dashboard`** — embedded operator dashboard (light/dark), **polling every 2s**:
+  stat tiles, per-host status chips, and largest-free-block meters with the 2 GB
+  reboot floor marked. Freshness is bounded by the poll interval — that's the
+  point of comparison with the Convex repo.
+
+The Lambda emits **CloudWatch EMF** log lines (`emit_emf` in
+`lambda/dkgr_handler.py`) instead of PutMetricData calls, and `cdk/lib/bwsim-stack.ts`
+defines a **CloudWatch dashboard** (`bwsim-fleet`): fleet single-values, min
+largest-free-block vs the reboot floor, max config-load vs the 30s SLA, and DKGR
+rotations vs errors.
+
 ## What to look at
 
 - `orchestrator/auto_reboot.py` — the judgment layer: *is this host unhealthy* is the

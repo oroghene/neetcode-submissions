@@ -42,6 +42,23 @@ def rotate_host_key(table, host_id: str, now: int) -> dict:
     return new_key
 
 
+def emit_emf(metrics: dict, dimensions: dict):
+    """CloudWatch Embedded Metric Format: a JSON log line the CloudWatch agent
+    turns into real metrics — no PutMetricData calls, no SDK batching."""
+    print(json.dumps({
+        "_aws": {
+            "Timestamp": int(time.time() * 1000),
+            "CloudWatchMetrics": [{
+                "Namespace": "BwSim/DKGR",
+                "Dimensions": [list(dimensions.keys())],
+                "Metrics": [{"Name": k, "Unit": "Count"} for k in metrics],
+            }],
+        },
+        **dimensions,
+        **metrics,
+    }))
+
+
 def handler(event, context):
     import boto3
 
@@ -49,6 +66,10 @@ def handler(event, context):
     hosts = event.get("hosts") or _fleet_hosts()
     now = int(time.time())
     rotated = [rotate_host_key(table, h, now)["version"] for h in hosts]
+    emit_emf(
+        {"KeysRotated": len(rotated), "RotationErrors": 0},
+        {"Service": "dkgr"},
+    )
     return {"rotated": len(rotated), "hosts": hosts}
 
 

@@ -5,6 +5,7 @@ import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as events from "aws-cdk-lib/aws-events";
 import * as targets from "aws-cdk-lib/aws-events-targets";
 import * as s3 from "aws-cdk-lib/aws-s3";
+import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
 
 export class BwsimStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -55,6 +56,60 @@ export class BwsimStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
     });
+
+    // Fleet dashboard. The control plane's /metrics endpoint is scraped by the
+    // CloudWatch agent into the BwSim/Fleet namespace; DKGR metrics arrive via
+    // EMF log lines (lambda/dkgr_handler.py emit_emf).
+    const fleetMetric = (metricName: string, statistic = "Maximum") =>
+      new cloudwatch.Metric({
+        namespace: "BwSim/Fleet",
+        metricName,
+        statistic,
+        period: cdk.Duration.minutes(1),
+      });
+
+    const dashboard = new cloudwatch.Dashboard(this, "FleetDashboard", {
+      dashboardName: "bwsim-fleet",
+    });
+    dashboard.addWidgets(
+      new cloudwatch.SingleValueWidget({
+        title: "Fleet",
+        metrics: [
+          fleetMetric("bwsim_hosts_connected"),
+          fleetMetric("bwsim_mitigations_active"),
+          fleetMetric("bwsim_drains_total"),
+        ],
+        width: 12,
+      }),
+      new cloudwatch.GraphWidget({
+        title: "Fragmentation early-warning (min largest_free_block_bytes)",
+        left: [fleetMetric("bwsim_host_largest_free_block_bytes", "Minimum")],
+        leftAnnotations: [
+          { value: 2 * 1024 ** 3, label: "reboot floor (2GB)", color: "#d03b3b" },
+        ],
+        width: 12,
+      }),
+      new cloudwatch.GraphWidget({
+        title: "Config load latency (max, vs 30s SLA)",
+        left: [fleetMetric("bwsim_host_config_load_ms", "Maximum")],
+        leftAnnotations: [{ value: 30_000, label: "load SLA", color: "#d03b3b" }],
+        width: 12,
+      }),
+      new cloudwatch.GraphWidget({
+        title: "DKGR rotations",
+        left: [
+          new cloudwatch.Metric({
+            namespace: "BwSim/DKGR",
+            metricName: "KeysRotated",
+            dimensionsMap: { Service: "dkgr" },
+            statistic: "Sum",
+            period: cdk.Duration.hours(1),
+          }),
+        ],
+        right: [dkgr.metricErrors()],
+        width: 12,
+      }),
+    );
 
     new cdk.CfnOutput(this, "HostHealthTable", { value: hostHealth.tableName });
     new cdk.CfnOutput(this, "LockTable", { value: locks.tableName });

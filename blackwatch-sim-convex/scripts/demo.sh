@@ -7,6 +7,10 @@ cd "$(dirname "$0")/.."
 cleanup() { kill $(jobs -p) 2>/dev/null || true; }
 trap cleanup EXIT
 
+echo "=== building + serving dashboard (http://localhost:8090) ==="
+npx esbuild dashboard/app.js --bundle --format=esm --outfile=dashboard/bundle.js --log-level=error
+node scripts/serve-dashboard.mjs &
+
 echo "=== starting agents (edge-3 simulates memory fragmentation) ==="
 node agents/agent.mjs --host-id=edge-1 --pop=iad-edge-1 &
 node agents/agent.mjs --host-id=edge-2 --pop=iad-edge-1 &

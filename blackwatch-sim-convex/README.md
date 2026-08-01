@@ -23,10 +23,33 @@ capacity-gated drain → reboot → resync), same demo script — different subs
 | Audit trail | Would need another table + careful dual-writes | `rebootLog` insert in the same transaction as the drain decision — can never disagree with what happened | Atomicity by default |
 | API abuse guard | Custom middleware you'd write | `@convex-dev/rate-limiter` component on `mitigations.place` | Installed, not built |
 | Infra definition | CDK stack (3 DynamoDB tables, Lambda, schedule, S3) | `convex/schema.ts` — the schema *is* the infra | No IaC layer |
+| Observability | Prometheus `/metrics` endpoint + JSON API + dashboard that polls every 2s; CloudWatch agent + EMF + CW dashboard in production | Metrics are **queries** (`convex/metrics.ts`); the dashboard subscribes and is pushed fresh values on every underlying write | No scrape pipeline; freshness not bounded by a poll interval |
 | Wire contract | `bwsim.proto` + protoc codegen for Go and Python | End-to-end TypeScript types from schema to client | No codegen step |
 
 Measured in the demo: mitigation **propagation ~40-50ms** from operator mutation to
 agent load, against the 30-second-class SLA the classic push pipeline is built to.
+
+## Observability
+
+![Reactive fleet dashboard](docs/dashboard-light.png)
+
+`convex/metrics.ts` defines metrics as plain queries over the tables the control
+plane already writes — no scrape endpoint, no agent-side aggregation. The
+dashboard (`dashboard/`) opens three subscriptions (fleet, metrics summary,
+reboot audit log) and re-renders on push; the "last push" stamp updates the
+moment any underlying row changes. Propagation latency (p50/p95) comes from
+`loadEvents` rows the agents record per config load — **p50 ~35ms** in the demo.
+
+```bash
+npx esbuild dashboard/app.js --bundle --format=esm --outfile=dashboard/bundle.js
+node scripts/serve-dashboard.mjs   # http://localhost:8090 (static files only —
+                                   # data flows straight from the deployment)
+```
+
+One honest nuance: the metrics *queries* rerun on their tables' writes, so a
+heartbeat-heavy fleet makes `metrics.summary` recompute often — at real scale
+you'd aggregate incrementally (exactly what the `@convex-dev/aggregate`
+component is for). Good interview question material.
 
 ## What Convex does NOT replace
 

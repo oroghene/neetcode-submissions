@@ -31,6 +31,7 @@ let rebooting = false;
 let desired = [];
 let leaking = LEAK; // a fresh boot clears the fragmentation bug
 let resyncing = false;
+let firstSync = true; // initial subscription delivery is a replay, not a push
 
 const client = new ConvexClient(URL);
 
@@ -40,18 +41,33 @@ function loadMitigation(m) {
   dp.mitigations.set(m.mitigationId, cost);
   if (leaking) dp.wasted += (2000 + Math.floor(Math.random() * 600)) * 1024 ** 2;
   lastLoadMs = Date.now() - start;
-  const latency = resyncing
-    ? "resync"
-    : `propagation=${Date.now() - m.placedAt}ms`;
+  const propagationMs = Date.now() - m.placedAt;
+  const latency = resyncing ? "resync" : `propagation=${propagationMs}ms`;
   log(
     `loaded ${m.mitigationId} action=${m.action} cidr=${m.targetCidr} ` +
       `${latency} largest_free_block=${Math.floor(largestFreeBlock() / 1024 ** 2)}MB`,
   );
+  if (!resyncing) {
+    void client
+      .mutation(api.metrics.recordLoad, {
+        hostId: HOST_ID,
+        mitigationId: m.mitigationId,
+        propagationMs,
+      })
+      .catch(() => {});
+  }
 }
 
 function syncConfigs(mitigations) {
   desired = mitigations;
   if (rebooting) return;
+  if (firstSync) {
+    firstSync = false;
+    resyncing = true;
+    for (const m of mitigations) loadMitigation(m);
+    resyncing = false;
+    return;
+  }
   for (const m of mitigations) {
     if (!dp.mitigations.has(m.mitigationId)) loadMitigation(m);
   }

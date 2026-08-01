@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bwsim fleet — polling dashboard</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb; --page: #f9f9f7;
+    --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --border: rgba(11,11,11,0.10);
+    --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+    --meter: #2a78d6; --meter-track: #e1e0d9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface: #1a1a19; --page: #0d0d0d;
+      --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --border: rgba(255,255,255,0.10);
+      --meter: #3987e5; --meter-track: #2c2c2a;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page); color: var(--ink); padding: 20px; max-width: 1060px; margin: 0 auto;
+  }
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  h1 { font-size: 17px; font-weight: 650; }
+  .transport {
+    font-size: 12px; color: var(--ink-2); border: 1px solid var(--border);
+    border-radius: 999px; padding: 2px 10px; background: var(--surface);
+  }
+  .updated { font-size: 12px; color: var(--muted); margin-left: auto; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .tile .label { font-size: 12px; color: var(--ink-2); }
+  .tile .value { font-size: 26px; font-weight: 650; margin-top: 2px; }
+  .tile .sub { font-size: 11px; color: var(--muted); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 4px 14px 10px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase;
+       letter-spacing: .04em; padding: 10px 10px 6px; border-bottom: 1px solid var(--grid); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+  .chip .dot { font-size: 11px; }
+  .meter { display: flex; align-items: center; gap: 8px; min-width: 190px; }
+  .meter .track { position: relative; flex: 1; height: 8px; border-radius: 4px; background: var(--meter-track); overflow: hidden; }
+  .meter .fill { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--meter); }
+  .meter .fill.low { background: var(--critical); }
+  .meter .floor { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--muted); }
+  .meter .val { font-size: 12px; color: var(--ink-2); width: 64px; text-align: right; }
+  .note { font-size: 12px; color: var(--muted); margin-top: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Scrubbing fleet — control plane</h1>
+  <span class="transport">HTTP polling &middot; every 2s</span>
+  <span class="updated" id="updated">connecting&hellip;</span>
+</header>
+
+<div class="tiles" id="tiles"></div>
+
+<div class="card">
+  <table>
+    <thead><tr>
+      <th>Host</th><th>POP</th><th>Status</th><th>Mitigations</th>
+      <th>Largest free block <span style="text-transform:none">(floor 2&thinsp;GB / pool 8&thinsp;GB)</span></th>
+      <th>Last load</th><th>Heartbeat</th>
+    </tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+<p class="note">Source: <code>/api/fleet</code> (JSON) &middot; Prometheus text at <code>/metrics</code>. Every consumer of this view polls; freshness is bounded by the poll interval.</p>
+
+<script>
+const POOL = 8 * 1024 ** 3, FLOOR = 2 * 1024 ** 3;
+const fmtMB = (b) => (b / 1024 ** 2).toFixed(0) + " MB";
+
+function statusChip(h) {
+  if (!h.connected) return ["○", "var(--critical)", "disconnected"];
+  if (h.draining)   return ["◐", "var(--warning)", "draining"];
+  if (h.largestFreeBlockBytes && h.largestFreeBlockBytes < FLOOR)
+                    return ["▲", "var(--serious)", "fragmented"];
+  return ["●", "var(--good)", "active"];
+}
+
+function tile(label, value, sub) {
+  return `<div class="tile"><div class="label">${label}</div><div class="value">${value}</div><div class="sub">${sub ?? ""}</div></div>`;
+}
+
+async function poll() {
+  try {
+    const f = await (await fetch("/api/fleet")).json();
+    const connected = f.hosts?.filter((h) => h.connected).length ?? 0;
+    document.getElementById("tiles").innerHTML =
+      tile("Hosts connected", `${connected}<span style="font-size:15px;color:var(--muted)">/${f.hosts?.length ?? 0}</span>`) +
+      tile("Active mitigations", f.activeMitigations, `${f.mitigationsPlaced} placed total`) +
+      tile("Config pushes", f.configPushes, "stream messages sent") +
+      tile("Drains issued", f.drains, "auto-reboot + manual") +
+      tile("Health reports", f.healthReports, "ingested via gRPC");
+
+    document.getElementById("rows").innerHTML = (f.hosts ?? []).map((h) => {
+      const [dot, color, label] = statusChip(h);
+      const pct = Math.min((h.largestFreeBlockBytes / POOL) * 100, 100);
+      const low = h.largestFreeBlockBytes < FLOOR;
+      return `<tr>
+        <td>${h.hostId}</td><td>${h.pop}</td>
+        <td><span class="chip"><span class="dot" style="color:${color}">${dot}</span>${label}</span></td>
+        <td>${h.activeMitigations}</td>
+        <td><div class="meter" title="${fmtMB(h.largestFreeBlockBytes)} largest contiguous free block">
+          <div class="track"><div class="fill${low ? " low" : ""}" style="width:${pct}%"></div>
+          <div class="floor" style="left:${(FLOOR / POOL) * 100}%"></div></div>
+          <span class="val">${fmtMB(h.largestFreeBlockBytes)}</span></div></td>
+        <td>${h.lastConfigLoadMs} ms</td>
+        <td>${h.heartbeatAgeS < 0 ? "—" : h.heartbeatAgeS.toFixed(1) + " s ago"}</td>
+      </tr>`;
+    }).join("");
+    document.getElementById("updated").textContent = "last poll " + new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById("updated").textContent = "poll failed: " + e.message;
+  }
+}
+poll();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>

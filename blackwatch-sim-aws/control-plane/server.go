@@ -26,6 +26,7 @@ type server struct {
 	hosts       map[string]*hostState
 	mitigations map[string]*bwsimv1.MitigationConfig
 	version     int64
+	counters    counters
 }
 
 func newServer() *server {
@@ -73,6 +74,7 @@ func (s *server) StreamMitigations(req *bwsimv1.StreamRequest, stream bwsimv1.Mi
 			s.disconnect(req.HostId, ch)
 			return err
 		}
+		s.counters.configPushes.Add(1)
 	}
 
 	for {
@@ -111,6 +113,7 @@ func (s *server) ReportHealth(_ context.Context, r *bwsimv1.HealthReport) (*bwsi
 		return &bwsimv1.Ack{Ok: false, Message: "unknown host"}, nil
 	}
 	h.lastHealth = r
+	s.counters.healthReports.Add(1)
 	return &bwsimv1.Ack{Ok: true}, nil
 }
 
@@ -122,12 +125,14 @@ func (s *server) PlaceMitigation(_ context.Context, req *bwsimv1.PlaceMitigation
 	m.Version = s.version
 	m.PlacedAtUnixMs = time.Now().UnixMilli()
 	s.mitigations[m.MitigationId] = m
+	s.counters.mitigationsPlaced.Add(1)
 	n := 0
 	for _, h := range s.hosts {
 		if h.connected && h.push != nil && !h.draining {
 			select {
 			case h.push <- &bwsimv1.PushMessage{Payload: &bwsimv1.PushMessage_Mitigation{Mitigation: m}}:
 				n++
+				s.counters.configPushes.Add(1)
 			default:
 				log.Printf("push buffer full for host, dropping (host will resync on reconnect)")
 			}
@@ -167,6 +172,7 @@ func (s *server) DrainHost(_ context.Context, req *bwsimv1.DrainRequest) (*bwsim
 		Reason:       req.Reason,
 		DrainSeconds: 2,
 	}}}
+	s.counters.drains.Add(1)
 	log.Printf("drain issued host=%s reason=%q", req.HostId, req.Reason)
 	return &bwsimv1.Ack{Ok: true}, nil
 }

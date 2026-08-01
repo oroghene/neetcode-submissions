@@ -18,6 +18,7 @@ import (
 
 func main() {
 	addr := flag.String("addr", ":50061", "listen address")
+	metricsAddr := flag.String("metrics-addr", ":8061", "HTTP address for /metrics, /api/fleet, /dashboard")
 	flag.Parse()
 
 	lis, err := net.Listen("tcp", *addr)
@@ -25,7 +26,9 @@ func main() {
 		log.Fatalf("listen: %v", err)
 	}
 	s := grpc.NewServer()
-	bwsimv1.RegisterMitigationServiceServer(s, newServer())
+	srv := newServer()
+	go srv.serveMetrics(*metricsAddr)
+	bwsimv1.RegisterMitigationServiceServer(s, srv)
 	log.Printf("control plane listening on %s", *addr)
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("serve: %v", err)

@@ -7,8 +7,8 @@ cd "$(dirname "$0")/.."
 cleanup() { kill $(jobs -p) 2>/dev/null || true; }
 trap cleanup EXIT
 
-echo "=== starting control plane ==="
-./bin/control-plane -addr :50061 &
+echo "=== starting control plane (dashboard: http://localhost:8061/dashboard) ==="
+./bin/control-plane -addr :50061 -metrics-addr :8061 &
 sleep 1
 
 echo "=== starting agents (edge-3 simulates memory fragmentation) ==="

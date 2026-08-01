@@ -41,6 +41,14 @@ export default defineSchema({
     decidedAt: v.number(),
   }).index("by_hostId", ["hostId"]),
 
+  // One row per mitigation load on a host; powers propagation-latency metrics.
+  loadEvents: defineTable({
+    hostId: v.string(),
+    mitigationId: v.string(),
+    propagationMs: v.number(),
+    loadedAt: v.number(),
+  }),
+
   datapathKeys: defineTable({
     hostId: v.string(),
     version: v.number(),
