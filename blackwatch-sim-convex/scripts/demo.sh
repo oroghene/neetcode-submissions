@@ -7,9 +7,17 @@ cd "$(dirname "$0")/.."
 cleanup() { kill $(jobs -p) 2>/dev/null || true; }
 trap cleanup EXIT
 
-echo "=== building + serving dashboard (http://localhost:8090) ==="
+# Point agents + dashboard at whatever deployment .env.local names
+# (CONVEX_URL from `npx convex dev`, or CONVEX_SELF_HOSTED_URL).
+if [ -f .env.local ]; then
+  export CONVEX_URL=$(grep -m1 -E '^CONVEX_(SELF_HOSTED_)?URL=' .env.local | cut -d= -f2-)
+fi
+: "${CONVEX_URL:=http://127.0.0.1:3210}"
+
+echo "=== building + serving dashboard ==="
 npx esbuild dashboard/app.js --bundle --format=esm --outfile=dashboard/bundle.js --log-level=error
 node scripts/serve-dashboard.mjs &
+echo ">>> dashboard: http://localhost:8090/?url=${CONVEX_URL} <<<"
 
 echo "=== starting agents (edge-3 simulates memory fragmentation) ==="
 node agents/agent.mjs --host-id=edge-1 --pop=iad-edge-1 &

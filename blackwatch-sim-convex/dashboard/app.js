@@ -3,7 +3,7 @@
 import { ConvexClient } from "convex/browser";
 import { api } from "../convex/_generated/api.js";
 
-const url = new URLSearchParams(location.search).get("url") ?? "http://127.0.0.1:3310";
+const url = new URLSearchParams(location.search).get("url") ?? "http://127.0.0.1:3210";
 const client = new ConvexClient(url);
 
 const POOL = 8 * 1024 ** 3;
