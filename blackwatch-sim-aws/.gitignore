@@ -1,0 +1,6 @@
+/bin/
+__pycache__/
+cdk/node_modules/
+cdk/dist/
+cdk/cdk.out/
+*.sqlite3

@@ -1,0 +1,13 @@
+{
+  "name": "blackwatch-sim-convex",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "convex dev",
+    "demo": "./scripts/demo.sh"
+  },
+  "dependencies": {
+    "convex": "^1.43.0",
+    "@convex-dev/rate-limiter": "^0.3.2"
+  }
+}

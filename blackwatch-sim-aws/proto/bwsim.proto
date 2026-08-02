@@ -1,0 +1,104 @@
+// Educational simulation of a DDoS scrubbing-fleet control plane.
+// Inspired by public descriptions of traffic-scrubbing architectures.
+// Contains no proprietary code or internal details of any real system.
+syntax = "proto3";
+
+package bwsim.v1;
+
+option go_package = "blackwatch-sim/control-plane/gen/bwsimv1";
+
+enum Action {
+  ACTION_UNSPECIFIED = 0;
+  PASS = 1;
+  THROTTLE = 2;
+  DROP = 3;
+}
+
+message HostInfo {
+  string host_id = 1;
+  string pop = 2;            // point of presence, e.g. "iad-edge-1"
+  int64 capacity_gbps = 3;
+}
+
+message RegisterAck {
+  bool ok = 1;
+  int64 stream_epoch = 2;    // bumped on every re-register, guards zombie streams
+}
+
+message MitigationConfig {
+  string mitigation_id = 1;
+  string target_cidr = 2;
+  Action action = 3;
+  int64 rate_limit_pps = 4;  // only meaningful for THROTTLE
+  int64 placed_at_unix_ms = 5;
+  int64 version = 6;
+}
+
+message RebootCommand {
+  string reason = 1;
+  int64 drain_seconds = 2;
+}
+
+// A single message on the host push stream: either config or control.
+message PushMessage {
+  oneof payload {
+    MitigationConfig mitigation = 1;
+    RebootCommand reboot = 2;
+  }
+}
+
+message StreamRequest {
+  string host_id = 1;
+}
+
+message HealthReport {
+  string host_id = 1;
+  double cpu_pct = 2;
+  int64 memory_used_bytes = 3;
+  // Fragmentation early-warning: if the largest contiguous free block is too
+  // small, the dataplane cannot allocate a new mitigation's filter structures
+  // even when total free memory looks fine.
+  int64 largest_free_block_bytes = 4;
+  int32 active_mitigations = 5;
+  int64 last_config_load_ms = 6; // measured against the load SLA
+  int64 reported_at_unix_ms = 7;
+}
+
+message Ack {
+  bool ok = 1;
+  string message = 2;
+}
+
+message PlaceMitigationRequest {
+  MitigationConfig config = 1;
+}
+
+message Empty {}
+
+message HostStatus {
+  HostInfo info = 1;
+  HealthReport last_health = 2;
+  bool connected = 3;
+  bool draining = 4;
+}
+
+message FleetStatus {
+  repeated HostStatus hosts = 1;
+}
+
+message DrainRequest {
+  string host_id = 1;
+  string reason = 2;
+}
+
+service MitigationService {
+  // Host-facing (the "data conduit").
+  rpc RegisterHost(HostInfo) returns (RegisterAck);
+  rpc StreamMitigations(StreamRequest) returns (stream PushMessage);
+  rpc ReportHealth(HealthReport) returns (Ack);
+
+  // Operator / orchestrator facing.
+  rpc PlaceMitigation(PlaceMitigationRequest) returns (Ack);
+  rpc ListFleet(Empty) returns (FleetStatus);
+  rpc DrainHost(DrainRequest) returns (Ack);
+}
